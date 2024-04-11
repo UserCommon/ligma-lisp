@@ -1,0 +1,9 @@
+#+title: Todo
+
+
+* TODO
+- [ ] CLI/REPL
+  ali main.lisp | TO INTERPRET FILE
+  ali repl      | TO ENTER INTERACTIVE SHELL
+- [ ] AST
+- [ ] Parsing
