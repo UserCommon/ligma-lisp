@@ -47,7 +47,7 @@ impl Env {
     }
 }
 
-pub fn eval<T: AsRef<str>>(code: T, env: Rc<RefCell<Env>>) -> Result<Object> {
+pub fn eval<T: AsRef<str>>(code: T, env: &mut Rc<RefCell<Env>>) -> Result<Object> {
 
     match crate::parser::parse(code) {
         Ok(parsed) => {
@@ -57,7 +57,7 @@ pub fn eval<T: AsRef<str>>(code: T, env: Rc<RefCell<Env>>) -> Result<Object> {
     }
 }
 
-fn eval_obj(obj: &Object, env: Rc<RefCell<Env>>) -> Result<Object> {
+fn eval_obj(obj: &Object, env: &mut Rc<RefCell<Env>>) -> Result<Object> {
     match obj {
         Void => Ok(Void),
         Function(_params, _body) => Ok(Void),
@@ -70,18 +70,19 @@ fn eval_obj(obj: &Object, env: Rc<RefCell<Env>>) -> Result<Object> {
 
 
 // Evals single Symbol
-fn eval_symbol<T>(symbol: T, env: Rc<RefCell<Env>>) -> Result<Object>
+fn eval_symbol<T>(symbol: T, env: &mut Rc<RefCell<Env>>) -> Result<Object>
     where T: AsRef<str>
 {
     let symbol = symbol.as_ref();
     let value = (*env).borrow_mut().get(symbol);
+
     match value {
         Some(x) => Ok(x.clone()),
         None => Err(EvaluatorError::Error("None symbol?".to_owned()))
     }
 }
 
-fn eval_list(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
+fn eval_list(list: &Vec<Object>, env: &mut Rc<RefCell<Env>>) -> Result<Object> {
     let head = &list[0];
     match head {
         Symbol(s) => match s.as_str() {
@@ -98,7 +99,7 @@ fn eval_list(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
         _ => {
             let mut new_list = vec![];
             for obj in list {
-                let result = eval_obj(obj, env.clone())?;
+                let result = eval_obj(obj, env)?;
                 match result {
                     Void => {},
                     _ => new_list.push(result),
@@ -109,12 +110,12 @@ fn eval_list(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
     }
 }
 
-fn eval_define(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
+fn eval_define(list: &Vec<Object>, env: &mut Rc<RefCell<Env>>) -> Result<Object> {
     let symbol = match &list[1] {
         Symbol(s) => s.clone(),
         _ => return Err(EvaluatorError::Error("Invalid define".to_owned()))
     };
-    let val = eval_obj(&list[2], env.clone())?;
+    let val = eval_obj(&list[2], env)?;
     (*env).borrow_mut().set(symbol, val);
     Ok(Void)
 }
@@ -123,14 +124,14 @@ fn eval_define(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
 
 // FIXME i think this is the shittiest thing there...
 // Binary ops only for numbers?
-fn eval_bin_op(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
+fn eval_bin_op(list: &Vec<Object>, env: &mut Rc<RefCell<Env>>) -> Result<Object> {
     if list.len() != 3 {
         return Err(EvaluatorError::Error("Failed to evaluate binary operation. Expected 3 object.".to_owned()));
     }
 
     let operator = &list[0];
-    let left = eval_obj(&list[1], env.clone())?;
-    let right = eval_obj(&list[2], env.clone())?;
+    let left = eval_obj(&list[1], env)?;
+    let right = eval_obj(&list[2], env)?;
 
     let lvalue = match left {
         // FIXME: Number only??? there should be a matching of operation!
@@ -171,16 +172,16 @@ fn eval_bin_op(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
     })
 }
 
-fn eval_if(list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
-    let cond_obj = eval_obj(&list[1], env.clone())?;
+fn eval_if(list: &Vec<Object>, env: &mut Rc<RefCell<Env>>) -> Result<Object> {
+    let cond_obj = eval_obj(&list[1], env)?;
     let cond = match cond_obj {
         Bool(b) => b,
         _ => return Err(EvaluatorError::Error("Expected boolean in conditional error, found something else".to_owned()))
     };
 
     match cond {
-        true => eval_obj(&list[2], env.clone()),
-        false => eval_obj(&list[3], env.clone())
+        true => eval_obj(&list[2], env),
+        false => eval_obj(&list[3], env)
     }
 }
 
@@ -209,21 +210,22 @@ fn eval_function_definition(list: &Vec<Object>) -> Result<Object> {
 }
 
 
-fn eval_function_call<T: AsRef<str>>(name: T, list: &Vec<Object>, env: Rc<RefCell<Env>>) -> Result<Object> {
-    match (*env).borrow_mut().get(name.as_ref()) {
+fn eval_function_call<T: AsRef<str>>(name: T, list: &Vec<Object>, env: &mut Rc<RefCell<Env>>) -> Result<Object> {
+    let m = env.borrow_mut().get(name.as_ref());
+    match m {
         Some(Function(params, body)) => {
-            let inner_environment = Rc::new(
+            let mut inner_environment = Rc::new(
                 RefCell::new(
                     Env::extend(env.clone())
                 )
             );
 
             for (idx, param) in params.iter().enumerate() {
-                let value = eval_obj(&list[idx + 1], env.clone())?;
-                inner_environment.deref().borrow_mut().set(param, value);
+                let value = eval_obj(&list[idx + 1], env)?;
+                inner_environment.borrow_mut().set(param, value);
             }
 
-            Ok(eval_obj(&List(body.clone()), inner_environment.clone())?)
+            Ok(eval_obj(&List(body.clone()), &mut inner_environment)?)
         },
         None => Err(EvaluatorError::Error("Failed to execute function! no such function is defined!".to_owned())),
         _ => Err(EvaluatorError::Error("Given a function for eval is not a function?".to_owned()))
@@ -236,20 +238,20 @@ mod evaluator_tests {
 
     #[test]
     fn test_add() {
-        let env = Rc::new(RefCell::new(Env::new()));
-        let result = eval("(+ 1 2)", env.clone()).unwrap();
+        let mut env = Rc::new(RefCell::new(Env::new()));
+        let result = eval("(+ 1 2)", &mut env).unwrap();
         assert_eq!(result, Object::Number(3.0));
     }
 
     #[test]
     fn test_area_of_a_circle() {
-        let env = Rc::new(RefCell::new(Env::new()));
+        let mut env = Rc::new(RefCell::new(Env::new()));
         let program = "(
                         (define r 10)
                         (define pi 314)
                         (* pi (* r r))
                       )";
-        let result = eval(program, env.clone()).unwrap();
+        let result = eval(program, &mut env).unwrap();
         assert_eq!(
             result,
             Object::List(vec![Object::Number((314.0 * 10.0 * 10.0) as f64)])
@@ -258,15 +260,29 @@ mod evaluator_tests {
 
     #[test]
     fn test_sqr_function() {
-        let env = Rc::new(RefCell::new(Env::new()));
+        let mut env = Rc::new(RefCell::new(Env::new()));
         let program = "(
                         (define sqr (lambda (r) (* r r)))
                         (sqr 10)
                        )";
-        let result = eval(program, env.clone()).unwrap();
+        let result = eval(program, &mut env).unwrap();
         assert_eq!(
             result,
             Object::List(vec![Object::Number((10.0 * 10.0) as f64)])
+        );
+    }
+
+    #[test]
+    fn test_is_borrowed() {
+        let mut env = Rc::new(RefCell::new(Env::new()));
+        let program = "(
+                        (define doo (lambda (x y z) (+ (+ x y) z)))
+                        (doo 10 20 30)
+                        )";
+        let result = eval(program, &mut env).unwrap();
+        assert_eq!(
+            result,
+            Object::List(vec![Object::Number(10.0 + 20.0 + 30.0 as f64)])
         );
     }
 }

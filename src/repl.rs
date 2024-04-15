@@ -7,14 +7,14 @@ use std::cell::RefCell;
 // files
 // FIXME supports only line-by-line input?
 pub fn repl(mut reader: impl BufRead) {
-    let env = Rc::new(RefCell::new(evaluator::Env::new()));
+    let mut env = Rc::new(RefCell::new(evaluator::Env::new()));
 
     let mut line = String::new();
     while line != "(exit)" {
         line.clear();
         reader.read_line(&mut line).expect("An error while reading input occured!");
         println!("{}", line);
-        match evaluator::eval(&line, env.clone()) {
+        match evaluator::eval(&line, &mut env) {
             Ok(val) => {
                 use parser::Object::*;
                 match val {
