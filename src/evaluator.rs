@@ -10,6 +10,8 @@ use Object::*;
 
 type Result<R> = std::result::Result<R, EvaluatorError>;
 
+
+// FIXME: Is Rc<RefCell> a good decision?
 #[derive(Debug, PartialEq, Default)]
 pub struct Env {
     prev: Option<Rc<RefCell<Env>>>,
